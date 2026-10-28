@@ -4,3 +4,6 @@ python-multipart==0.0.32
 opencv-python-headless==5.0.0.93
 numpy==2.5.4
 httpx==0.28.1
+# Test tooling (also used by pytest.ini)
+pytest==9.2.0
+pytest-asyncio==1.4.1

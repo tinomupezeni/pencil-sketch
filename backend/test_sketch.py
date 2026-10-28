@@ -8,6 +8,8 @@ pin basic output shape and determinism, not to validate visual quality.
 import cv2
 import numpy as np
 import pytest
+import tracemalloc
+from time import perf_counter
 
 import sketch
 from sketch import image_to_strokes
@@ -453,3 +455,51 @@ def test_tone_aware_shading_is_deterministic():
     first = image_to_strokes(data, style="graphite")
     second = image_to_strokes(data, style="graphite")
     assert first == second
+
+
+def _near_black_stress_image_bytes(size=180):
+    img = np.full((size, size, 3), 15, dtype=np.uint8)
+    ok, buf = cv2.imencode(".png", img)
+    assert ok
+    return buf.tobytes()
+
+
+def test_stroke_generation_stress_records_bounded_deterministic_output():
+    data = _near_black_stress_image_bytes()
+    samples = []
+    for _ in range(2):
+        tracemalloc.start()
+        started = perf_counter()
+        result = image_to_strokes(data, style="graphite")
+        elapsed = perf_counter() - started
+        _current, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+        hatch = [s for s in result["strokes"] if s["kind"] == "hatch"]
+        samples.append((result, elapsed, peak, len(hatch), sum(s["shade"] for s in hatch)))
+
+    first, second = samples
+    assert first[0] == second[0]
+    assert first[3] > 0 and first[3] <= sketch.MAX_HATCH_STROKES
+    assert first[2] > 0 and first[4] > 0
+    # A generous runaway-work guard, not an artistic or throughput target.
+    assert first[1] < 60.0
+
+
+def test_post_generation_cap_measures_dark_stroke_retention(monkeypatch):
+    data = _near_black_stress_image_bytes(size=140)
+    uncapped = [s for s in image_to_strokes(data, style="graphite")["strokes"] if s["kind"] == "hatch"]
+    assert len(uncapped) > 100
+
+    monkeypatch.setattr(sketch, "MAX_HATCH_STROKES", 100)
+    capped = [s for s in image_to_strokes(data, style="graphite")["strokes"] if s["kind"] == "hatch"]
+    assert len(capped) <= 100
+
+    uncapped_dark = sum(s["shade"] > 0.7 for s in uncapped)
+    capped_dark = sum(s["shade"] > 0.7 for s in capped)
+    assert uncapped_dark > 0
+    dark_retention = capped_dark / uncapped_dark
+    # Quantifies the current even-stride policy. Because all hatches are
+    # sorted light-to-dark before [::stride] sampling, this deliberately
+    # records that dark strokes are disproportionately discarded. A future
+    # replacement should change this measured result and update the test.
+    assert dark_retention < 0.1

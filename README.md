@@ -31,6 +31,11 @@ pip install -r requirements.txt
 uvicorn main:app --reload
 ```
 
+Run the backend tests from `backend/` with `pytest -q`. Run the frontend
+tests from `frontend/` with `npm test`. The backend requirements are pinned in
+`backend/requirements.txt`; use the same Python environment for the server
+and tests.
+
 Then open http://127.0.0.1:8000 and upload an image.
 
 ## Next steps / ideas
