@@ -1,0 +1,35 @@
+{
+  "name": "low_contrast_photo",
+  "sourceFile": "low_contrast_photo.png",
+  "style": "faithful",
+  "width": 480,
+  "height": 360,
+  "strokeCounts": {
+    "line": 7,
+    "hatch": 17460,
+    "colored": 0,
+    "total": 17467
+  },
+  "processingSeconds": 2.297,
+  "payloadBytes": 13009476,
+  "durationPlanning": {
+    "requested": false,
+    "fullNaturalSeconds": 1170.1,
+    "pacing": "natural",
+    "accelerationFactor": 1.0
+  },
+  "stageCounts": {
+    "1": 3,
+    "2": 4,
+    "3": 10458,
+    "4": 6928,
+    "5": 74
+  },
+  "totalEstimatedSeconds": 2457.06,
+  "renderedMetrics": {
+    "avgLuminance": 175.5,
+    "darkCoveragePct": 6.38,
+    "backgroundCleanliness": 252.0,
+    "colorPreserved": false
+  }
+}

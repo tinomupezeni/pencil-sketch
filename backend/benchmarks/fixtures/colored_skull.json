@@ -1,0 +1,35 @@
+{
+  "name": "colored_skull",
+  "sourceFile": "colored_skull.jpeg",
+  "style": "faithful",
+  "width": 579,
+  "height": 760,
+  "strokeCounts": {
+    "line": 149,
+    "hatch": 60284,
+    "colored": 1380,
+    "total": 60433
+  },
+  "processingSeconds": 9.073,
+  "payloadBytes": 45709328,
+  "durationPlanning": {
+    "requested": false,
+    "fullNaturalSeconds": 4308.7,
+    "pacing": "natural",
+    "accelerationFactor": 1.0
+  },
+  "stageCounts": {
+    "1": 3,
+    "2": 146,
+    "3": 20017,
+    "4": 26084,
+    "5": 14183
+  },
+  "totalEstimatedSeconds": 8483.898,
+  "renderedMetrics": {
+    "avgLuminance": 166.0,
+    "darkCoveragePct": 34.77,
+    "backgroundCleanliness": 252.0,
+    "colorPreserved": true
+  }
+}

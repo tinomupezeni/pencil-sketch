@@ -1,0 +1,35 @@
+{
+  "name": "full_color_portrait",
+  "sourceFile": "full_color_portrait.png",
+  "style": "faithful",
+  "width": 480,
+  "height": 600,
+  "strokeCounts": {
+    "line": 34,
+    "hatch": 18374,
+    "colored": 17550,
+    "total": 18408
+  },
+  "processingSeconds": 3.001,
+  "payloadBytes": 14097241,
+  "durationPlanning": {
+    "requested": false,
+    "fullNaturalSeconds": 1278.4,
+    "pacing": "natural",
+    "accelerationFactor": 1.0
+  },
+  "stageCounts": {
+    "1": 3,
+    "2": 31,
+    "3": 651,
+    "4": 5516,
+    "5": 12207
+  },
+  "totalEstimatedSeconds": 2635.856,
+  "renderedMetrics": {
+    "avgLuminance": 198.9,
+    "darkCoveragePct": 25.51,
+    "backgroundCleanliness": 252.0,
+    "colorPreserved": true
+  }
+}

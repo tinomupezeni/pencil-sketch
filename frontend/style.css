@@ -1,0 +1,872 @@
+/* ---------------------------------------------------------------------
+   Design system: a quiet digital atelier. Warm studio surround, a cooler
+   neutral "mat" behind the paper, bright paper itself, charcoal ink.
+   Every color/spacing/radius value is a custom property so the palette
+   stays coherent and easy to retune in one place.
+------------------------------------------------------------------------ */
+:root {
+  --color-studio-bg: #eae6de; /* app shell background */
+  --color-workspace-bg: #d9d5cd; /* the "mat" the paper sits on */
+  --color-paper: #fdfbf5;
+  --color-surface: #ffffff;
+  --color-ink: #35332e;
+  --color-ink-muted: #817b71;
+  --color-ink-faint: #a69c89;
+  --color-border: #d8d2c4;
+  --color-accent: #8a6a46;
+  --color-accent-soft: #efe6d8;
+  --color-danger: #a33d2f;
+  --color-surface-dark: #393630; /* primary/dark interactive surfaces */
+  --color-surface-light: #f9f7f2; /* secondary/light interactive surfaces */
+
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 14px;
+  --space-4: 22px;
+  --space-5: 36px;
+  --space-6: 56px;
+
+  --radius-sm: 4px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+
+  --shadow-soft: 0 1px 3px rgba(53, 51, 46, 0.06), 0 6px 20px rgba(53, 51, 46, 0.05);
+  --shadow-paper: 0 2px 2px rgba(53, 51, 46, 0.04), 0 10px 34px rgba(53, 51, 46, 0.09);
+
+  --transition-fast: 150ms ease;
+  --transition-med: 320ms ease;
+
+  --topbar-height: 56px;
+  --control-min-target: 44px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-ui);
+  background: var(--color-studio-bg);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* =============================== App shell ============================= */
+/* #app is a column: a small fixed-height top bar, then a body that fills
+   the rest of the viewport (min-height: 100dvh rather than vh, so mobile
+   browser chrome doesn't cause a layout jump). Every flex ancestor in this
+   chain gets min-height: 0 so children are actually allowed to shrink to
+   fit instead of overflowing -- the classic flexbox gotcha that otherwise
+   silently breaks "fit the artwork to the available space". */
+#app {
+  display: flex;
+  flex-direction: column;
+  /* `height`, not `min-height`: the flex:1 workspace below (with its own
+     min-height: 0) only actually shrinks to fit the viewport if this
+     container's height is *fixed* at the viewport size -- min-height lets
+     content grow the whole page taller than the viewport instead, which
+     silently pushed the control dock below the fold (screenshot-caught). */
+  height: 100dvh;
+}
+
+.studio-topbar {
+  flex: 0 0 var(--topbar-height);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--space-4);
+  background: var(--color-studio-bg);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-ink);
+}
+
+.brand-mark {
+  font-size: 17px;
+  color: var(--color-accent);
+}
+
+.brand-name {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.topbar-controls {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.topbar-button {
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-ink-muted);
+  font-size: 15px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.topbar-button:hover {
+  background: var(--color-workspace-bg);
+  color: var(--color-ink);
+}
+
+.studio-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* =========================== Setup Studio =========================== */
+
+.setup-studio {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  justify-content: center;
+  padding: var(--space-6) var(--space-4);
+  /* Safety net, not the primary layout mechanism: on a very small/short
+     viewport where the setup content genuinely can't fit, scroll rather
+     than silently clip content with no way to reach it. */
+  overflow-y: auto;
+}
+
+/* Vertical centering via margin: auto on the child, deliberately NOT
+   align-items: center on the parent -- the latter is a real trap with
+   overflow: on a tall viewport .setup-layout centers normally, but on a
+   short one where it's taller than .setup-studio, align-items: center
+   would make the content overflow symmetrically above *and* below, and a
+   scrollable ancestor's default scroll position can't reach that
+   above-the-fold overflow at all (content becomes permanently
+   unreachable, not just visually off -- this was caught on an actual
+   390x844 screenshot). margin: auto collapses to 0 when there's no room
+   instead, so the content simply starts flush at the top and everything
+   stays reachable by scrolling. */
+.setup-layout {
+  margin: auto 0;
+}
+
+/* Single column by default (tablet/mobile; also the floor for desktop
+   below 1100px) -- a centered, generously-proportioned column, never the
+   full viewport width, so text lines stay readable. The image-selection
+   workspace and the preview become a true two-column layout only once
+   there's room for both side by side without cramping either. */
+.setup-layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-6);
+  width: 100%;
+  max-width: 640px;
+}
+
+@media (min-width: 1100px) {
+  .setup-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    max-width: 1000px;
+    align-items: center;
+  }
+}
+
+.setup-form-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.welcome {
+  margin-bottom: var(--space-5);
+}
+
+.welcome-headline {
+  margin: 0 0 var(--space-2);
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+  color: var(--color-ink);
+}
+
+.welcome-sub {
+  margin: 0;
+  font-size: 15px;
+  color: var(--color-ink-muted);
+  line-height: 1.5;
+}
+
+/* The artwork preview lives in its own column on wide viewports, and
+   stacks below the form otherwise -- always present (never a giant empty
+   placeholder pushing other controls away: its height is capped and
+   matched to the form column via `align-items: center` above, or a fixed
+   aspect-ratio below that breakpoint). */
+.setup-preview-col {
+  display: flex;
+  align-items: stretch;
+}
+
+.preview-frame {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 5;
+  max-height: 440px;
+  background: var(--color-workspace-bg);
+  border-radius: var(--radius-lg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: var(--space-4);
+}
+
+.selection-preview-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+  background: var(--color-paper);
+  box-shadow: var(--shadow-soft);
+}
+
+.preview-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-ink-faint);
+  font-size: 13.5px;
+  text-align: center;
+  padding: var(--space-5);
+}
+
+.preview-empty-icon {
+  font-size: 30px;
+  opacity: 0.7;
+}
+
+.resume-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  background: var(--color-accent-soft);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-4);
+  font-size: 14px;
+  color: var(--color-ink);
+}
+
+.resume-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+/* Segmented control: a single pill-shaped track with one sliding active
+   surface, not two separate browser-default buttons. */
+.source-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--color-workspace-bg);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-4);
+}
+
+.source-tab {
+  flex: 1;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  background: transparent;
+  color: var(--color-ink-muted);
+  border-radius: calc(var(--radius-md) - 3px);
+  cursor: pointer;
+  font-size: 14px;
+  font-family: inherit;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.source-tab.active {
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-weight: 600;
+  box-shadow: var(--shadow-soft);
+}
+
+.source-tab:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.source-panel {
+  margin-bottom: var(--space-4);
+  min-height: 108px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+/* Custom-designed upload area: the real <input type=file> is visually
+   hidden (not removed -- it's still the thing that opens the OS file
+   picker and receives keyboard Enter/Space via the label's native
+   for/htmlFor association) and this label is the actual, fully-styled,
+   keyboard-focusable control the user sees and interacts with. */
+.upload-dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  text-align: center;
+  padding: var(--space-5) var(--space-4);
+  border: 1.5px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-ink-muted);
+  cursor: pointer;
+  font-size: 14.5px;
+  transition: border-color var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
+}
+
+.upload-dropzone:hover,
+.upload-dropzone:focus-visible {
+  border-color: var(--color-accent);
+  color: var(--color-ink);
+  background: var(--color-accent-soft);
+}
+
+.upload-dropzone:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.upload-dropzone.dragover {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+  color: var(--color-ink);
+}
+
+.dropzone-icon {
+  font-size: 26px;
+  opacity: 0.75;
+}
+
+.dropzone-filename {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-ink);
+}
+
+.link-row {
+  display: flex;
+  gap: var(--space-2);
+}
+
+#image-url-input {
+  flex: 1;
+  padding: var(--space-2) var(--space-3);
+  height: 44px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-family: inherit;
+  background: var(--color-surface);
+  color: var(--color-ink);
+}
+
+#image-url-input:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.link-status {
+  min-height: 18px;
+  font-size: 13px;
+  color: var(--color-ink-muted);
+  margin-top: var(--space-2);
+}
+
+.link-status.error {
+  color: var(--color-danger);
+}
+
+.style-field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.style-field-label {
+  font-size: 14px;
+  color: var(--color-ink-muted);
+  white-space: nowrap;
+}
+
+.style-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--color-workspace-bg);
+  border-radius: var(--radius-md);
+}
+
+.style-tab {
+  padding: 6px var(--space-3);
+  border: none;
+  background: transparent;
+  color: var(--color-ink-muted);
+  border-radius: calc(var(--radius-md) - 3px);
+  cursor: pointer;
+  font-size: 13px;
+  font-family: inherit;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.style-tab.active {
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-weight: 600;
+  box-shadow: var(--shadow-soft);
+}
+
+.style-tab:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.duration-field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.duration-icon {
+  font-size: 15px;
+  color: var(--color-ink-muted);
+}
+
+.duration-field-label {
+  font-size: 14px;
+  color: var(--color-ink-muted);
+  white-space: nowrap;
+}
+
+.select-shell {
+  position: relative;
+  flex: 1;
+  max-width: 220px;
+}
+
+/* appearance: none removes the native OS dropdown chrome (the exact
+   "default dropdown styling" this phase flagged); the chevron span
+   replaces it with one that matches the rest of the design system. */
+.select-shell select {
+  width: 100%;
+  height: 44px;
+  padding: 0 var(--space-4) 0 var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-family: inherit;
+  font-size: 14px;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+}
+
+.select-shell select:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.select-chevron {
+  position: absolute;
+  right: var(--space-3);
+  top: 50%;
+  transform: translateY(-60%);
+  color: var(--color-ink-muted);
+  pointer-events: none;
+  font-size: 14px;
+}
+
+.text-button {
+  height: 44px;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-family: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.text-button:hover {
+  border-color: var(--color-accent);
+}
+
+.text-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.primary-button {
+  height: 48px;
+  padding: 0 var(--space-5);
+  border: 1px solid var(--color-surface-dark);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-dark);
+  color: var(--color-surface-light);
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: opacity var(--transition-fast);
+}
+
+.begin-button {
+  width: 100%;
+  margin-top: var(--space-1);
+}
+
+.primary-button:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+.primary-button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.primary-button:focus-visible,
+.text-button:focus-visible,
+.topbar-button:focus-visible,
+.dock-button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.setup-status {
+  min-height: 20px;
+  font-size: 13.5px;
+  color: var(--color-ink-muted);
+  margin-top: var(--space-3);
+  text-align: center;
+}
+
+.setup-status.error {
+  color: var(--color-danger);
+}
+
+/* ========================= Drawing Studio ============================ */
+
+.drawing-studio {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* --- Art workspace: a dedicated viewing area (the "mat"), the paper
+   centered within it with generous, constant breathing room. The paper
+   never touches the workspace edge, never crops, never stretches. */
+.art-workspace {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-workspace-bg);
+  padding: var(--space-6) var(--space-5);
+}
+
+.paper-stage {
+  max-width: 100%;
+  max-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-paper);
+  overflow: hidden;
+}
+
+/* .paper-inner carries the aspect-ratio (set inline by main.js from the
+   plan's own width/height). With max-width/max-height: 100% and
+   width/height: auto, it sizes to the largest box that both fits inside
+   .paper-stage's bounds *and* preserves that aspect ratio -- the same
+   effect as object-fit: contain, but for a live Canvas pair rather than
+   an <img>. Canvases simply fill it; backing-store resolution (scaled for
+   devicePixelRatio) is set independently in main.js. */
+.paper-inner {
+  position: relative;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  background: var(--color-paper);
+  line-height: 0;
+}
+
+#canvas,
+#tip-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+#tip-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+/* Fullscreen targets the *whole* drawing studio (art workspace + session
+   bar + control dock together), not just the canvas wrapper -- fullscreen
+   only renders the fullscreened element and its descendants, so
+   fullscreening the canvas alone would silently drop the progress/controls
+   bar entirely (it's a DOM sibling, not a descendant), leaving no way to
+   see progress or exit without guessing at Escape. This was caught by an
+   actual screenshot, not assumed. The existing flex layout needs no
+   special-case sizing here -- it already fits whatever space its
+   container provides, fullscreen or not. */
+.drawing-studio:fullscreen {
+  background: #16140f;
+}
+
+.drawing-studio:fullscreen .paper-stage {
+  box-shadow: none;
+}
+
+/* ----------------------------- Session bar ----------------------------- */
+/* Directly beneath the artwork, in normal document flow (not a floating
+   overlay): one cohesive, minimal dark tool panel -- design reference:
+   Suminagashi Studio's control panel -- housing both the progress readout
+   and the controls together, rather than scattered separate light pill
+   buttons loose on the page. The panel itself (and its progress text)
+   always stays visible; only the button row within it fades on idle, so
+   "essential progress stays visible even when secondary controls hide"
+   still holds. */
+
+.session-bar {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: center;
+  padding: var(--space-4) var(--space-4) var(--space-5);
+  background: var(--color-studio-bg);
+}
+
+.session-panel {
+  width: min(100%, 460px);
+  background: var(--color-surface-dark);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-3);
+  box-shadow: var(--shadow-soft);
+}
+
+.session-info {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-1);
+  font-size: 13px;
+  color: var(--color-surface-light);
+}
+
+.phase-text {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pacing-badge {
+  flex: 0 0 auto;
+  padding: 1px var(--space-1);
+  border-radius: 999px;
+  border: 1px solid rgba(249, 247, 242, 0.35);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--color-surface-light);
+  white-space: nowrap;
+}
+
+.progress-track {
+  flex: 1 1 auto;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(249, 247, 242, 0.16);
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--color-accent);
+  border-radius: 2px;
+  transition: width 300ms linear;
+}
+
+.time-text {
+  color: rgba(249, 247, 242, 0.6);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.panel-divider {
+  height: 1px;
+  background: rgba(249, 247, 242, 0.12);
+  margin: var(--space-2) var(--space-1);
+}
+
+/* -------------------------- Control dock ----------------------------- */
+
+.control-dock {
+  display: flex;
+  justify-content: center;
+  gap: 2px;
+  opacity: 1;
+  transition: opacity var(--transition-med);
+}
+
+.control-dock.idle {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.dock-button {
+  width: var(--control-min-target);
+  height: var(--control-min-target);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-surface-light);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--transition-fast), transform var(--transition-fast);
+}
+
+.dock-button:hover {
+  background: rgba(249, 247, 242, 0.12);
+}
+
+.dock-button:active {
+  transform: scale(0.95);
+}
+
+.dock-button.primary {
+  background: var(--color-surface-light);
+  color: var(--color-surface-dark);
+}
+
+.dock-button.primary:hover {
+  opacity: 0.88;
+  background: var(--color-surface-light);
+}
+
+/* ============================= Focus mode ============================== */
+/* A distinct, distraction-free viewing mode: the top bar disappears
+   entirely (reclaiming that space for the artwork) and the control dock
+   follows the normal auto-hide-on-idle behavior more aggressively. Session
+   progress info always remains -- focus mode narrows chrome, it never
+   removes the user's ability to understand the drawing's state. */
+#app[data-focus="true"] .studio-topbar {
+  display: none;
+}
+
+#app[data-focus="true"] .art-workspace {
+  padding: var(--space-4) var(--space-3);
+}
+
+/* =============================== Responsive ============================ */
+
+@media (max-width: 640px) {
+  .studio-topbar {
+    padding: 0 var(--space-3);
+  }
+
+  .setup-studio {
+    padding: var(--space-4) var(--space-3);
+  }
+
+  .art-workspace {
+    padding: var(--space-4) var(--space-3);
+  }
+
+  .session-bar {
+    padding: var(--space-3) var(--space-3) var(--space-4);
+  }
+
+  .welcome-headline {
+    font-size: 23px;
+  }
+
+  .setup-layout {
+    gap: var(--space-4);
+  }
+
+  .preview-frame {
+    max-height: 280px;
+  }
+
+  .primary-button {
+    width: 100%;
+  }
+
+  .session-info {
+    font-size: 12.5px;
+  }
+
+  .dock-button {
+    width: 40px;
+    height: 40px;
+    font-size: 15px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0.01ms !important;
+  }
+}

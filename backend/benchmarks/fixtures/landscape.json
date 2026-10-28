@@ -1,0 +1,35 @@
+{
+  "name": "landscape",
+  "sourceFile": "landscape.png",
+  "style": "faithful",
+  "width": 700,
+  "height": 500,
+  "strokeCounts": {
+    "line": 9,
+    "hatch": 37868,
+    "colored": 37865,
+    "total": 37877
+  },
+  "processingSeconds": 7.191,
+  "payloadBytes": 28157178,
+  "durationPlanning": {
+    "requested": false,
+    "fullNaturalSeconds": 2323.5,
+    "pacing": "natural",
+    "accelerationFactor": 1.0
+  },
+  "stageCounts": {
+    "1": 3,
+    "2": 6,
+    "3": 1256,
+    "4": 12842,
+    "5": 23770
+  },
+  "totalEstimatedSeconds": 4825.138,
+  "renderedMetrics": {
+    "avgLuminance": 173.7,
+    "darkCoveragePct": 26.65,
+    "backgroundCleanliness": 252.0,
+    "colorPreserved": true
+  }
+}

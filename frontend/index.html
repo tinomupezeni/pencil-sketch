@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Atelier — Pencil Sketch</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app" data-mode="setup" data-focus="false">
+
+    <header class="studio-topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">✎</span>
+        <span class="brand-name">Atelier</span>
+      </div>
+      <div class="topbar-controls">
+        <button id="fullscreen" type="button" class="topbar-button" title="Full screen" aria-label="Full screen" hidden>
+          <span aria-hidden="true">⛶</span>
+        </button>
+      </div>
+    </header>
+
+    <main class="studio-body">
+
+      <!-- MODE A: Setup Studio -->
+      <section id="setup-studio" class="setup-studio">
+        <div class="setup-layout">
+
+          <div class="setup-form-col">
+            <div class="welcome">
+              <h1 class="welcome-headline">Every drawing begins somewhere.</h1>
+              <p class="welcome-sub">Choose an image. Set your pace. Watch your artwork come to life.</p>
+            </div>
+
+            <div id="resume-banner" class="resume-banner" hidden>
+              <span id="resume-text" class="resume-text"></span>
+              <div class="resume-actions">
+                <button id="resume-accept" type="button" class="text-button">Resume</button>
+                <button id="resume-dismiss" type="button" class="text-button">Dismiss</button>
+              </div>
+            </div>
+
+            <div class="source-tabs" role="tablist">
+              <button id="tab-upload" class="source-tab active" type="button" role="tab" aria-selected="true">Upload Image</button>
+              <button id="tab-link" class="source-tab" type="button" role="tab" aria-selected="false">Paste Image Link</button>
+            </div>
+
+            <div id="source-upload" class="source-panel">
+              <label
+                for="file-input"
+                id="upload-dropzone"
+                class="upload-dropzone"
+                tabindex="0"
+                role="button"
+                aria-label="Choose or drop an image to upload"
+              >
+                <span class="dropzone-icon" aria-hidden="true">🖼</span>
+                <span class="dropzone-text">Drag an image here, or click to browse</span>
+                <span id="upload-filename" class="dropzone-filename"></span>
+              </label>
+              <input id="file-input" type="file" accept="image/*" class="visually-hidden" />
+            </div>
+
+            <div id="source-link" class="source-panel" hidden>
+              <div class="link-row">
+                <input
+                  id="image-url-input"
+                  type="url"
+                  inputmode="url"
+                  placeholder="Paste a Pinterest Pin link or direct image URL…"
+                  autocomplete="off"
+                />
+                <button id="preview-url" type="button" class="text-button">Preview</button>
+              </div>
+              <div id="link-status" class="link-status"></div>
+            </div>
+
+            <div class="style-field">
+              <span class="style-field-label">Style</span>
+              <div class="style-tabs" role="radiogroup" aria-label="Drawing style">
+                <button id="style-faithful" type="button" class="style-tab active" role="radio" aria-checked="true" title="Preserves recognizable source colors as muted colored-pencil accents">
+                  Faithful Pencil
+                </button>
+                <button id="style-graphite" type="button" class="style-tab" role="radio" aria-checked="false" title="An intentional black-and-white pencil interpretation">
+                  Graphite Study
+                </button>
+              </div>
+            </div>
+
+            <div class="duration-field">
+              <span class="duration-icon" aria-hidden="true">🕐</span>
+              <label for="duration" class="duration-field-label">Draw over</label>
+              <div class="select-shell">
+                <select id="duration">
+                  <option value="2">2 minutes (preview)</option>
+                  <option value="15">15 minutes</option>
+                  <option value="30">30 minutes</option>
+                  <option value="60">1 hour</option>
+                  <option value="120" selected>2 hours</option>
+                  <option value="240">4 hours</option>
+                </select>
+                <span class="select-chevron" aria-hidden="true">⌄</span>
+              </div>
+            </div>
+
+            <button id="start-drawing" type="button" class="primary-button begin-button" disabled>
+              Begin Drawing
+            </button>
+
+            <div id="setup-status" class="setup-status"></div>
+          </div>
+
+          <div class="setup-preview-col">
+            <div class="preview-frame">
+              <img id="selection-preview-image" class="selection-preview-image" hidden alt="Selected image preview" />
+              <div id="preview-empty-state" class="preview-empty-state">
+                <span class="preview-empty-icon" aria-hidden="true">🖼</span>
+                <span>Your artwork will appear here</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- MODE B: Immersive Drawing Studio -->
+      <section id="drawing-studio" class="drawing-studio" hidden>
+        <div class="art-workspace">
+          <div class="paper-stage" id="canvas-wrap">
+            <div class="paper-inner" id="paper-inner">
+              <canvas id="canvas"></canvas>
+              <canvas id="tip-canvas"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <div class="session-bar">
+          <!-- One cohesive, minimal dark tool panel (design reference:
+               Suminagashi Studio's control panel) housing both the
+               progress readout and the controls together, instead of
+               separate light pill buttons loose on the page. -->
+          <div class="session-panel">
+            <div class="session-info" aria-live="polite">
+              <span id="phase-progress-line" class="phase-text">Beginning</span>
+              <span id="pacing-badge" class="pacing-badge" hidden title="This session is sped up to fit the selected duration">Time-lapse</span>
+              <div class="progress-track">
+                <div id="progress-fill" class="progress-fill"></div>
+              </div>
+              <span id="time-remaining" class="time-text"></span>
+            </div>
+
+            <div class="panel-divider" role="presentation"></div>
+
+            <div id="drawing-controls" class="control-dock">
+              <button id="new-drawing" type="button" class="dock-button" title="New drawing" aria-label="Return to setup">
+                <span aria-hidden="true">↩</span>
+              </button>
+              <button id="focus-toggle" type="button" class="dock-button" title="Focus mode" aria-label="Toggle focus mode">
+                <span aria-hidden="true">◱</span>
+              </button>
+              <button id="pause-resume" type="button" class="dock-button primary" title="Pause" aria-label="Pause">
+                <span aria-hidden="true">⏸</span>
+              </button>
+              <button id="replay" type="button" class="dock-button" title="Replay" aria-label="Replay">
+                <span aria-hidden="true">↻</span>
+              </button>
+              <button id="save-artwork" type="button" class="dock-button" title="Save artwork" aria-label="Save artwork" hidden>
+                <span aria-hidden="true">⭳</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>

@@ -1,0 +1,35 @@
+{
+  "name": "geometric_object",
+  "sourceFile": "geometric_object.png",
+  "style": "faithful",
+  "width": 500,
+  "height": 500,
+  "strokeCounts": {
+    "line": 15,
+    "hatch": 15123,
+    "colored": 15123,
+    "total": 15138
+  },
+  "processingSeconds": 2.248,
+  "payloadBytes": 11797779,
+  "durationPlanning": {
+    "requested": false,
+    "fullNaturalSeconds": 1096.2,
+    "pacing": "natural",
+    "accelerationFactor": 1.0
+  },
+  "stageCounts": {
+    "1": 3,
+    "2": 12,
+    "3": 430,
+    "4": 4877,
+    "5": 9816
+  },
+  "totalEstimatedSeconds": 1761.372,
+  "renderedMetrics": {
+    "avgLuminance": 204.3,
+    "darkCoveragePct": 9.4,
+    "backgroundCleanliness": 252.0,
+    "colorPreserved": true
+  }
+}
