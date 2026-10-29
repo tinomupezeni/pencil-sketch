@@ -23,6 +23,7 @@ import { createIdleState, recordActivity, setFocusWithinControls, shouldShowCont
 import { WakeLockController } from "./js/wake-lock.js";
 import { createSessionStore } from "./js/session-store.js";
 import { ageDescription } from "./js/session-policy.js";
+import { containDimensions } from "./js/fit.js";
 
 const appEl = document.getElementById("app");
 const setupStudio = document.getElementById("setup-studio");
@@ -53,6 +54,7 @@ const resumeAcceptBtn = document.getElementById("resume-accept");
 const resumeDismissBtn = document.getElementById("resume-dismiss");
 
 const paperInner = document.getElementById("paper-inner");
+const artWorkspace = document.querySelector(".art-workspace");
 const canvas = document.getElementById("canvas");
 const tipCanvas = document.getElementById("tip-canvas");
 const phaseProgressLineEl = document.getElementById("phase-progress-line");
@@ -131,6 +133,25 @@ function formatDuration(ms) {
 // resize or fullscreen toggle, which must NOT reset the drawing.
 const MAX_DEVICE_PIXEL_RATIO = 2;
 
+function fitPaperToWorkspace() {
+  if (!currentPlan || !artWorkspace.clientWidth || !artWorkspace.clientHeight) return;
+  const workspaceStyle = getComputedStyle(artWorkspace);
+  const availableWidth = artWorkspace.clientWidth
+    - parseFloat(workspaceStyle.paddingLeft)
+    - parseFloat(workspaceStyle.paddingRight);
+  const availableHeight = artWorkspace.clientHeight
+    - parseFloat(workspaceStyle.paddingTop)
+    - parseFloat(workspaceStyle.paddingBottom);
+  const fitted = containDimensions(
+    currentPlan.width,
+    currentPlan.height,
+    availableWidth,
+    availableHeight,
+  );
+  paperInner.style.width = `${fitted.width}px`;
+  paperInner.style.height = `${fitted.height}px`;
+}
+
 function resizeCanvases(width, height) {
   const dpr = Math.min(MAX_DEVICE_PIXEL_RATIO, window.devicePixelRatio || 1);
   paperInner.style.aspectRatio = `${width} / ${height}`;
@@ -140,7 +161,14 @@ function resizeCanvases(width, height) {
   tipCanvas.height = canvas.height;
   canvas.getContext("2d").setTransform(dpr, 0, 0, dpr, 0, 0);
   tipCanvas.getContext("2d").setTransform(dpr, 0, 0, dpr, 0, 0);
+  fitPaperToWorkspace();
 }
+
+// CSS-only resizing keeps the backing store and renderer coordinates intact.
+// A ResizeObserver also catches fullscreen transitions without clearing the
+// existing drawing bitmap.
+const workspaceResizeObserver = new ResizeObserver(() => fitPaperToWorkspace());
+workspaceResizeObserver.observe(artWorkspace);
 
 // One shared seed drives every bit of controlled variation (motion jitter,
 // travel bow, evaluation-pause placement, pressure jitter) so a given

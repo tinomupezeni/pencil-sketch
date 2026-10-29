@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import math
 import random
+import time
 from dataclasses import dataclass
 
 import cv2
@@ -168,6 +169,180 @@ COARSE_MIN_CONTOUR_LENGTH = 28.0
 # regardless (caught by test_multi_scale_contours_recover_small_detail...).
 FINE_MIN_CONTOUR_LENGTH = 9.0
 TOTAL_LINE_STROKE_CAP = STRUCTURAL_CONTOUR_SLOTS + FINE_CONTOUR_SLOTS
+class GenerationInstrumentation:
+    """Opt-in, observational counters for Phase 10.5.
+
+    The collector is deliberately separate from the stroke data model. When
+    omitted, the generation path performs no metric bookkeeping and returns
+    exactly the historical drawing plan.
+    """
+
+    def __init__(self, image_shape: tuple[int, int] | None = None):
+        self.started = time.perf_counter()
+        self.image_shape = image_shape
+        self.total = {"candidate_evaluations": 0, "accepted_seeds": 0, "rejected_seeds": 0,
+                      "streamline_steps": 0, "allocated_points": 0, "strokes": 0}
+        self.passes: dict[str, dict] = {}
+        self._eligible_union = np.zeros(image_shape, dtype=bool) if image_shape else None
+        self._eligible_coverage = np.zeros(image_shape, dtype=np.uint16) if image_shape else None
+
+    def bucket(self, name: str) -> dict:
+        return self.passes.setdefault(name, {
+            "candidate_evaluations": 0, "accepted_seeds": 0, "rejected_seeds": 0,
+            "streamline_steps": 0, "allocated_points": 0, "strokes": 0,
+            "eligible_pixels": 0, "new_eligible_pixels": 0, "regions": {},
+            "rejection_reasons": {"outside_mask": 0, "accumulation_cap": 0,
+                                   "budget_exhausted": 0, "trace_invalid": 0, "background_suppression": 0},
+        })
+
+    def finish(self) -> dict:
+        return {"elapsed_seconds": time.perf_counter() - self.started,
+                "image_shape": self.image_shape, "total": dict(self.total),
+                "passes": self.passes}
+
+    def validate_accounting(self) -> None:
+        """Assert candidate accounting is complete for every pass and total."""
+        reason_names = ("outside_mask", "background_suppression", "accumulation_cap", "budget_exhausted", "trace_invalid")
+        for name, bucket in self.passes.items():
+            rejected = sum(bucket["rejection_reasons"].get(reason, 0) for reason in reason_names)
+            assert bucket["candidate_evaluations"] == bucket["accepted_seeds"] + rejected, name
+        aggregate_candidates = sum(bucket["candidate_evaluations"] for bucket in self.passes.values())
+        aggregate_accepted = sum(bucket["accepted_seeds"] for bucket in self.passes.values())
+        aggregate_rejected = sum(
+            bucket["rejection_reasons"].get(reason, 0)
+            for bucket in self.passes.values() for reason in reason_names
+        )
+        assert self.total["candidate_evaluations"] == aggregate_candidates
+        assert self.total["accepted_seeds"] == aggregate_accepted
+        assert self.total["rejected_seeds"] == aggregate_rejected
+        assert self.total["candidate_evaluations"] == self.total["accepted_seeds"] + self.total["rejected_seeds"]
+
+    def plan_budgets(self, total_budget: int = MAX_HATCH_STROKES) -> dict:
+        """Deterministically simulate demand-weighted band budgets.
+
+        `new_eligible_pixels` is measured against a union of earlier masks,
+        so cumulative tonal bands do not count the same dark pixels repeatedly.
+        This is a dry-run only; it never changes generation.
+        """
+        demand = {}
+        for name, bucket in self.passes.items():
+            if not (name.startswith("band:") or name.startswith("color:")):
+                continue
+            darkness = max(0.0, 255.0 - bucket.get("mean_tone", 255.0))
+            # Cumulative masks overlap by design. Count new pixels fully and
+            # repeated pixels as weighted tonal-depth demand, rather than
+            # pretending every band's full area is independent image area.
+            overlap = bucket.get("overlap_eligible_pixels", 0)
+            depth_weight = 0.25 + bucket.get("shade", 0.0)
+            demand[name] = max(1.0, bucket["new_eligible_pixels"] + overlap * depth_weight)
+        total_demand = sum(demand.values()) or 1.0
+        budgets = {name: int(total_budget * value / total_demand) for name, value in demand.items()}
+        # Deterministic largest-remainder distribution makes the simulated
+        # allocation sum exactly to the requested budget.
+        remainder = total_budget - sum(budgets.values())
+        for name in sorted(demand, key=lambda n: (-(total_budget * demand[n] / total_demand - budgets[n]), n))[:remainder]:
+            budgets[name] += 1
+        return {"total_budget": total_budget, "demand": demand, "budgets": budgets,
+                "simulated_retention": {name: min(1.0, budgets[name] / max(1, self.passes[name]["strokes"]))
+                                         for name in budgets},
+                "simulated_loss": {name: max(0, self.passes[name]["strokes"] - budgets[name])
+                                   for name in budgets},
+                "spatial_demand": self._spatial_demand(),
+                "spatial_quota_conflicts": self._spatial_quota_conflicts()}
+
+    def _spatial_demand(self) -> dict[str, int]:
+        demand: dict[str, int] = {}
+        for bucket in self.passes.values():
+            for region, values in bucket.get("regions", {}).items():
+                demand[region] = demand.get(region, 0) + values["candidates"]
+        return dict(sorted(demand.items()))
+
+    def _spatial_quota_conflicts(self) -> dict[str, int]:
+        """Reports cells where accepted seeds exceed the local cap.
+
+        Current generation must never produce a positive conflict. This is a
+        diagnostic for whether a future spatial quota would fight the existing
+        tone-dependent accumulation cap, not an enforcement mechanism.
+        """
+        accepted_by_region: dict[str, int] = {}
+        for bucket in self.passes.values():
+            for region, values in bucket.get("regions", {}).items():
+                accepted_by_region[region] = accepted_by_region.get(region, 0) + values["accepted"]
+        return {region: accepted - MAX_LOCAL_ACCUMULATION for region, accepted in accepted_by_region.items()
+                if accepted > MAX_LOCAL_ACCUMULATION}
+
+
+class ResourceBudgetScheduler:
+    """Initial, opt-in pass scheduler for predicted pathological demand.
+
+    It is deliberately conservative: normal benchmark-shaped images stay on
+    the historical path. When active, pass budgets are allocated from fixed
+    tonal-demand weights, with progressively darker and cross-hatched passes
+    receiving larger shares. This is enforcement before tracing, not the old
+    post-generation stride truncation.
+    """
+
+    PASS_WEIGHTS = {
+        **{f"band:{threshold}:parallel": 1.0 + index * 0.15
+           for index, threshold in enumerate((240, 222, 200, 178, 155, 132, 108, 85, 62, 40))},
+        **{f"band:{threshold}:cross": 1.3 + index * 0.18
+           for index, threshold in enumerate((108, 85, 62, 40))},
+    }
+
+    def __init__(self, total_budget: int = MAX_HATCH_STROKES, *, active: bool = False):
+        self.total_budget = total_budget
+        self.active = active
+        self.budgets: dict[str, int] = {}
+        self.accepted: dict[str, int] = {}
+        self.exhausted: dict[str, int] = {}
+        self.color_budget = int(total_budget * 0.15)
+        self.color_accepted = 0
+        if active:
+            total_weight = sum(self.PASS_WEIGHTS.values())
+            neutral_budget = total_budget - self.color_budget
+            self.budgets = {name: int(neutral_budget * weight / total_weight)
+                            for name, weight in self.PASS_WEIGHTS.items()}
+            remainder = neutral_budget - sum(self.budgets.values())
+            for name in sorted(self.PASS_WEIGHTS)[-remainder:]:
+                self.budgets[name] += 1
+
+    @classmethod
+    def from_tone(cls, tone: np.ndarray) -> "ResourceBudgetScheduler":
+        # The first implementation intentionally activates only for a broad,
+        # uniformly near-black field large enough to threaten the ceiling.
+        # Ordinary benchmark images therefore retain byte-identical output.
+        h, w = tone.shape
+        active = h * w >= 500_000 and float(np.percentile(tone, 90)) < 40
+        return cls(active=active)
+
+    def permits(self, pass_name: str) -> bool:
+        if not self.active:
+            return True
+        if pass_name.startswith("color:"):
+            if self.color_accepted >= self.color_budget:
+                self.exhausted[pass_name] = self.exhausted.get(pass_name, 0) + 1
+                return False
+            return True
+        budget = self.budgets.get(pass_name, 0)
+        used = self.accepted.get(pass_name, 0)
+        if used >= budget:
+            self.exhausted[pass_name] = self.exhausted.get(pass_name, 0) + 1
+            return False
+        return True
+
+    def accepted_one(self, pass_name: str) -> None:
+        if self.active:
+            if pass_name.startswith("color:"):
+                self.color_accepted += 1
+                return
+            self.accepted[pass_name] = self.accepted.get(pass_name, 0) + 1
+
+    def report(self) -> dict:
+        return {"active": self.active, "total_budget": self.total_budget,
+                "budgets": dict(self.budgets), "accepted": dict(self.accepted),
+                "exhausted_candidates": dict(self.exhausted),
+                "color_budget": self.color_budget, "color_accepted": self.color_accepted,
+                "accepted_total": sum(self.accepted.values()) + self.color_accepted}
 
 
 @dataclass
@@ -306,7 +481,8 @@ def _flow_field(
 
 
 def _trace_streamline(
-    x0: float, y0: float, fx: np.ndarray, fy: np.ndarray, mask: np.ndarray, half_len: float, step: float
+    x0: float, y0: float, fx: np.ndarray, fy: np.ndarray, mask: np.ndarray, half_len: float, step: float,
+    metrics: dict | None = None,
 ) -> list[list[float]]:
     h, w = mask.shape
     forward: list[list[float]] = []
@@ -317,6 +493,8 @@ def _trace_streamline(
         px, py = None, None  # previous (smoothed) direction, for momentum
         n_steps = int(half_len / step)
         for _ in range(n_steps):
+            if metrics is not None:
+                metrics["streamline_steps"] += 1
             xi, yi = int(round(x)), int(round(y))
             if not (0 <= xi < w and 0 <= yi < h) or not mask[yi, xi]:
                 break
@@ -363,6 +541,9 @@ def _hatch_pass(
     perpendicular: bool = False,
     extra_mask: np.ndarray | None = None,
     color: str | None = None,
+    instrumentation: GenerationInstrumentation | None = None,
+    pass_name: str = "band:unknown",
+    scheduler: ResourceBudgetScheduler | None = None,
 ) -> list[Stroke]:
     h, w = tone.shape
     mask = tone < max_intensity
@@ -375,22 +556,71 @@ def _hatch_pass(
         fx, fy = -fy, fx
 
     strokes: list[Stroke] = []
+    stats = instrumentation.bucket(pass_name) if instrumentation else None
+    def reject(reason: str, region_stats: dict | None = None) -> None:
+        if stats is not None:
+            stats["rejected_seeds"] += 1
+            stats["rejection_reasons"][reason] += 1
+            if region_stats is not None:
+                region_stats["rejected"] += 1
+            instrumentation.total["rejected_seeds"] += 1
+    if stats is not None:
+        stats["eligible_pixels"] += int(mask.sum())
+        stats["mean_tone"] = float(tone[mask].mean()) if mask.any() else 255.0
+        if instrumentation._eligible_union is not None:
+            new_pixels = mask & ~instrumentation._eligible_union
+            stats["new_eligible_pixels"] += int(new_pixels.sum())
+            stats["overlap_eligible_pixels"] = stats.get("overlap_eligible_pixels", 0) + int((mask & instrumentation._eligible_union).sum())
+            instrumentation._eligible_union |= mask
+            instrumentation._eligible_coverage[mask] += 1
+        stats["shade"] = shade
     step_y = max(1, int(round(spacing)))
     for gy0 in range(0, h, step_y):
         for gx0 in range(0, w, step_y):
+            if stats is not None:
+                stats["candidate_evaluations"] += 1
+                instrumentation.total["candidate_evaluations"] += 1
             jx = gx0 + rng.uniform(-spacing, spacing) * 0.5
             jy = gy0 + rng.uniform(-spacing, spacing) * 0.5
             xi, yi = int(round(jx)), int(round(jy))
             if not (0 <= xi < w and 0 <= yi < h) or not mask[yi, xi]:
+                if (0 <= xi < w and 0 <= yi < h and extra_mask is not None
+                        and tone[yi, xi] < max_intensity and not extra_mask[yi, xi]):
+                    reject("background_suppression")
+                else:
+                    reject("outside_mask")
+                continue
+            if stats is not None:
+                region = f"{yi // ACCUM_CELL_PX},{xi // ACCUM_CELL_PX}"
+                region_stats = stats["regions"].setdefault(region, {"candidates": 0, "accepted": 0, "rejected": 0})
+                region_stats["candidates"] += 1
+            if scheduler is not None and not scheduler.permits(pass_name):
+                reject("budget_exhausted", stats["regions"][region] if stats is not None else None)
                 continue
             if _accum_at(accum, xi, yi) >= _accumulation_cap_for_tone(tone[yi, xi]):
+                reject("accumulation_cap", stats["regions"][region] if stats is not None else None)
                 continue
-            pts = _trace_streamline(jx, jy, fx, fy, mask, half_len=length / 2, step=2.0)
+            before_steps = stats["streamline_steps"] if stats is not None else 0
+            pts = _trace_streamline(jx, jy, fx, fy, mask, half_len=length / 2, step=2.0,
+                                    metrics=stats)
+            if stats is not None:
+                instrumentation.total["streamline_steps"] += stats["streamline_steps"] - before_steps
             if len(pts) < 4:
+                reject("trace_invalid", stats["regions"][region] if stats is not None else None)
                 continue
             local_shade = shade * rng.uniform(0.85, 1.05)
             strokes.append(Stroke(points=pts, width=width, shade=min(local_shade, 0.95), kind="hatch", color=color))
             _accumulate(accum, xi, yi)
+            if scheduler is not None:
+                scheduler.accepted_one(pass_name)
+            if stats is not None:
+                stats["accepted_seeds"] += 1
+                stats["regions"][region]["accepted"] += 1
+                stats["allocated_points"] += len(pts)
+                stats["strokes"] += 1
+                instrumentation.total["accepted_seeds"] += 1
+                instrumentation.total["allocated_points"] += len(pts)
+                instrumentation.total["strokes"] += 1
 
     return strokes
 
@@ -403,6 +633,8 @@ def _extract_hatch_strokes(
     accum: np.ndarray,
     background_ceiling: float | None,
     exclude_mask: np.ndarray | None,
+    instrumentation: GenerationInstrumentation | None = None,
+    scheduler: ResourceBudgetScheduler | None = None,
 ) -> list[Stroke]:
     # (max_intensity_for_band, seed_spacing_px, stroke_length_px, shade, width)
     # Light bands get dense-but-faint strokes so paper doesn't stay bare —
@@ -426,6 +658,7 @@ def _extract_hatch_strokes(
 
     all_strokes: list[Stroke] = []
     for max_intensity, spacing, length, shade, width in bands:
+        band_name = f"band:{max_intensity}:parallel"
         # Never hatch within MIN_TONAL_SIGNIFICANCE of this image's own
         # brightest tones -- derived from the actual image, not assumed to
         # be pure white, so pale (but not literally white) paper stays
@@ -442,6 +675,8 @@ def _extract_hatch_strokes(
             _hatch_pass(
                 tone, fx, fy, effective_max, spacing * HATCH_SPACING_SCALE, length, shade, width, rng, accum,
                 extra_mask=not_background,
+                instrumentation=instrumentation, pass_name=band_name,
+                scheduler=scheduler,
             )
         )
         # The deepest shadows get a second, perpendicular pass — real
@@ -452,6 +687,8 @@ def _extract_hatch_strokes(
                 _hatch_pass(
                     tone, fx, fy, effective_max, spacing * 1.4 * HATCH_SPACING_SCALE, length * 0.8, shade * 0.8,
                     width, rng, accum, perpendicular=True, extra_mask=not_background,
+                    instrumentation=instrumentation, pass_name=f"band:{max_intensity}:cross",
+                    scheduler=scheduler,
                 )
             )
 
@@ -470,7 +707,9 @@ def _muted_hex_color(median_bgr: np.ndarray, gray_equivalent: float, mute_factor
 
 
 def _extract_colored_strokes(
-    img_bgr: np.ndarray, tone: np.ndarray, fx: np.ndarray, fy: np.ndarray, rng: random.Random, accum: np.ndarray
+    img_bgr: np.ndarray, tone: np.ndarray, fx: np.ndarray, fy: np.ndarray, rng: random.Random, accum: np.ndarray,
+    instrumentation: GenerationInstrumentation | None = None,
+    scheduler: ResourceBudgetScheduler | None = None,
 ) -> tuple[list[Stroke], np.ndarray]:
     """Source-color preservation for Faithful Pencil (section 3): finds
     connected regions of the image that are meaningfully chromatic in
@@ -553,17 +792,23 @@ def _extract_colored_strokes(
                 (p20 + 1.0, 2.7, 29, 0.80, 1.2),
             ]
             for max_intensity, spacing, length, shade, width in color_bands:
+                pass_name = f"color:{bin_index}:band:{max_intensity:.1f}"
                 strokes.extend(
                     _hatch_pass(
                         tone, fx, fy, max_intensity, spacing * HATCH_SPACING_SCALE, length, shade, width, rng, accum,
                         extra_mask=region_mask, color=hex_color,
+                        instrumentation=instrumentation, pass_name=pass_name,
+                        scheduler=scheduler,
                     )
                 )
 
     return strokes, combined_mask
 
 
-def image_to_strokes(image_bytes: bytes, style: str = STYLE_FAITHFUL) -> dict:
+def image_to_strokes(image_bytes: bytes, style: str = STYLE_FAITHFUL,
+                     instrumentation: GenerationInstrumentation | None = None,
+                     scheduler_override: bool | None = None,
+                     scheduler_budget_override: int | None = None) -> dict:
     if style not in VALID_STYLES:
         raise ValueError(f"Unknown style: {style!r} (expected one of {VALID_STYLES})")
 
@@ -579,6 +824,10 @@ def image_to_strokes(image_bytes: bytes, style: str = STYLE_FAITHFUL) -> dict:
 
     img = _resize_to_max_dim(img)
     h, w = img.shape[:2]
+    if instrumentation is not None and instrumentation._eligible_union is None:
+        instrumentation.image_shape = (h, w)
+        instrumentation._eligible_union = np.zeros((h, w), dtype=bool)
+        instrumentation._eligible_coverage = np.zeros((h, w), dtype=np.uint16)
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
     # Smoothed tone target that hatch density follows — broad continuous
@@ -589,6 +838,12 @@ def image_to_strokes(image_bytes: bytes, style: str = STYLE_FAITHFUL) -> dict:
     tone = cv2.bilateralFilter(gray, d=9, sigmaColor=45, sigmaSpace=45)
 
     fx, fy = _flow_field(gray)
+    # Test-only A/B control. Production callers omit this argument and retain
+    # the normal activation predicate; the override is never read from an
+    # HTTP request or user-controlled input.
+    scheduler = (ResourceBudgetScheduler(total_budget=scheduler_budget_override or MAX_HATCH_STROKES,
+                                         active=scheduler_override)
+                 if scheduler_override is not None else ResourceBudgetScheduler.from_tone(tone))
 
     rng = random.Random(7)
     accum = np.zeros((math.ceil(h / ACCUM_CELL_PX), math.ceil(w / ACCUM_CELL_PX)), dtype=np.uint8)
@@ -608,13 +863,19 @@ def image_to_strokes(image_bytes: bytes, style: str = STYLE_FAITHFUL) -> dict:
     colored_strokes: list[Stroke] = []
     color_region_mask: np.ndarray | None = None
     if style == STYLE_FAITHFUL:
-        colored_strokes, color_region_mask = _extract_colored_strokes(img, tone, fx, fy, rng, accum)
+        colored_strokes, color_region_mask = _extract_colored_strokes(
+            img, tone, fx, fy, rng, accum, instrumentation, scheduler
+        )
 
     line_strokes = _extract_line_strokes(gray)
-    neutral_hatch_strokes = _extract_hatch_strokes(tone, fx, fy, rng, accum, background_ceiling, color_region_mask)
+    neutral_hatch_strokes = _extract_hatch_strokes(
+        tone, fx, fy, rng, accum, background_ceiling, color_region_mask, instrumentation
+        , scheduler
+    )
 
     all_hatch = neutral_hatch_strokes + colored_strokes
     all_hatch.sort(key=lambda s: s.shade)
+    pre_truncation_hatch_count = len(all_hatch)
     if len(all_hatch) > MAX_HATCH_STROKES:
         # Safety backstop, not a normal-path limit: keeps worst-case memory/
         # payload/processing time bounded for a pathological input (e.g. a
@@ -631,8 +892,21 @@ def image_to_strokes(image_bytes: bytes, style: str = STYLE_FAITHFUL) -> dict:
     dark = [s for s in all_hatch if s.shade > 0.4]
     ordered = light + line_strokes + dark
 
-    return {
+    result = {
         "width": w,
         "height": h,
         "strokes": [s.to_json() for s in ordered],
     }
+    if instrumentation is not None:
+        instrumentation.validate_accounting()
+        result["instrumentation"] = instrumentation.finish()
+        result["instrumentation"]["budget_simulation"] = instrumentation.plan_budgets()
+        result["instrumentation"]["resource_scheduler"] = scheduler.report()
+        result["instrumentation"]["post_generation"] = {
+            "hatch_before_truncation": pre_truncation_hatch_count,
+            "hatch_after_truncation": len(all_hatch),
+            "truncated": max(0, pre_truncation_hatch_count - len(all_hatch)),
+        }
+    elif scheduler.active:
+        result["resourceScheduler"] = scheduler.report()
+    return result

@@ -23,6 +23,41 @@ stroke by stroke.
 
 ## Run it
 
+### Docker (recommended)
+
+Start the app in the background:
+
+```bash
+docker compose up -d --build
+```
+
+Then open http://127.0.0.1:8000. The Compose service uses Docker's
+`unless-stopped` restart policy, so it comes back automatically after a
+container failure or computer restart, as long as Docker Desktop/Docker
+Engine is configured to start on boot. Check it with:
+
+```bash
+docker compose ps
+docker compose logs -f
+```
+
+Stop it when needed:
+
+```bash
+docker compose down
+```
+
+On Linux, enable Docker at boot once with:
+
+```bash
+sudo systemctl enable --now docker
+```
+
+On Docker Desktop, enable “Start Docker Desktop when you sign in” in
+Settings > General.
+
+### Local Python
+
 ```bash
 cd backend
 python3 -m venv .venv

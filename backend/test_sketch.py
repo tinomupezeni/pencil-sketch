@@ -503,3 +503,67 @@ def test_post_generation_cap_measures_dark_stroke_retention(monkeypatch):
     # records that dark strokes are disproportionately discarded. A future
     # replacement should change this measured result and update the test.
     assert dark_retention < 0.1
+
+
+def test_instrumentation_is_opt_in_and_does_not_change_the_plan():
+    data = _tonal_bands_image_bytes(width=240, height=80)
+    plain = image_to_strokes(data, style="graphite")
+    collector = sketch.GenerationInstrumentation()
+    observed = image_to_strokes(data, style="graphite", instrumentation=collector)
+    observed_without_metrics = {key: value for key, value in observed.items() if key != "instrumentation"}
+    assert observed_without_metrics == plain
+    assert observed["instrumentation"]["total"]["candidate_evaluations"] > 0
+    assert observed["instrumentation"]["total"]["streamline_steps"] > 0
+    assert observed["instrumentation"]["total"]["allocated_points"] > 0
+
+
+def test_budget_simulation_uses_union_demand_for_overlapping_bands():
+    collector = sketch.GenerationInstrumentation((4, 4))
+    first = collector.bucket("band:240:parallel")
+    second = collector.bucket("band:200:parallel")
+    first.update({"new_eligible_pixels": 12, "overlap_eligible_pixels": 0, "strokes": 12, "mean_tone": 100, "shade": 0.2})
+    second.update({"new_eligible_pixels": 0, "overlap_eligible_pixels": 12, "strokes": 12, "mean_tone": 20, "shade": 0.8})
+    plan = collector.plan_budgets(total_budget=100)
+    assert plan["demand"]["band:200:parallel"] > plan["demand"]["band:240:parallel"]
+    assert sum(plan["budgets"].values()) == 100
+    assert plan["simulated_retention"]["band:240:parallel"] <= 1.0
+
+
+def test_instrumentation_accounting_invariants_hold_for_every_pass():
+    collector = sketch.GenerationInstrumentation()
+    result = image_to_strokes(_tonal_bands_image_bytes(width=240, height=80), instrumentation=collector)
+    collector.validate_accounting()
+    for metrics in result["instrumentation"]["passes"].values():
+        assert metrics["candidate_evaluations"] == metrics["accepted_seeds"] + sum(metrics["rejection_reasons"].values())
+
+
+def test_resource_scheduler_reserves_dark_passes_and_reports_exhaustion():
+    scheduler = sketch.ResourceBudgetScheduler(total_budget=100, active=True)
+    light = scheduler.budgets["band:240:parallel"]
+    dark = scheduler.budgets["band:40:parallel"]
+    cross = scheduler.budgets["band:40:cross"]
+    assert dark > light
+    assert cross > light
+    for _ in range(scheduler.budgets["band:40:parallel"]):
+        assert scheduler.permits("band:40:parallel")
+        scheduler.accepted_one("band:40:parallel")
+    assert not scheduler.permits("band:40:parallel")
+    assert scheduler.report()["exhausted_candidates"]["band:40:parallel"] == 1
+
+
+def test_resource_scheduler_activation_is_limited_to_predicted_pathology():
+    normal = np.full((760, 579), 128, dtype=np.uint8)
+    pathological = np.full((760, 760), 15, dtype=np.uint8)
+    assert not sketch.ResourceBudgetScheduler.from_tone(normal).active
+    assert sketch.ResourceBudgetScheduler.from_tone(pathological).active
+
+
+def test_scheduler_override_is_test_only_and_accounted():
+    data = _near_black_stress_image_bytes(size=120)
+    collector = sketch.GenerationInstrumentation()
+    result = image_to_strokes(data, style="graphite", instrumentation=collector, scheduler_override=True)
+    report = result["instrumentation"]["resource_scheduler"]
+    assert report["active"] is True
+    assert report["accepted_total"] <= report["total_budget"]
+    assert result["instrumentation"]["post_generation"]["truncated"] == 0
+    assert sum(report["exhausted_candidates"].values()) >= 0

@@ -1,0 +1,9 @@
+.git
+.venv
+__pycache__
+*.pyc
+frontend/node_modules
+backend/benchmarks/screenshots
+designs
+images
+933300722809696649.jpeg
